@@ -176,6 +176,7 @@ int main(int argc, char **argv) {
     uint64_t start    = time_us();
     uint64_t complete = 0;
     uint64_t bytes    = 0;
+    uint64_t sum_latency    = 0;
     errors errors     = { 0 };
 
     for (uint64_t i = 0; i < cfg.threads; i++) {
@@ -184,6 +185,7 @@ int main(int argc, char **argv) {
 
         complete += t->complete;
         bytes    += t->bytes;
+        sum_latency    += t->sum_latency;
 
         errors.connect += t->errors.connect;
         errors.read    += t->errors.read;
@@ -196,6 +198,7 @@ int main(int argc, char **argv) {
     long double runtime_s   = runtime_us / 1000000.0;
     long double req_per_s   = complete   / runtime_s;
     long double bytes_per_s = bytes      / runtime_s;
+    long double avg_latency = sum_latency / complete;
 
     print_stats_header();
     print_stats("Latency", statistics.latency, format_time_us);
@@ -216,6 +219,7 @@ int main(int argc, char **argv) {
 
     printf("Requests/sec: %9.2Lf\n", req_per_s);
     printf("Transfer/sec: %10sB\n", format_binary(bytes_per_s));
+    printf("Avg latency : %9.2Lf\n", avg_latency);
 
     lua_State *L = threads[0].L;
     if (script_has_done(L)) {
@@ -424,6 +428,7 @@ static int response_complete(http_parser *parser) {
 
     if (--c->pending == 0) {
         stats_record(thread->latency, now - c->start);
+        thread->sum_latency += now - c->start;
         aeCreateFileEvent(thread->loop, c->fd, AE_WRITABLE, socket_writeable, c);
     }
 
