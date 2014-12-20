@@ -2,6 +2,7 @@
 
 #include "wrk.h"
 #include "main.h"
+#include "ae.h"
 
 static struct config {
     struct addrinfo addr;
@@ -131,9 +132,13 @@ int main(int argc, char **argv) {
     statistics.latency  = stats_alloc(SAMPLES);
     statistics.requests = stats_alloc(SAMPLES);
 
-    thread *threads = zcalloc(cfg.threads * sizeof(thread));
+    thread *threads = zcalloc((cfg.threads+1) * sizeof(thread));
     uint64_t connections = cfg.connections / cfg.threads;
     uint64_t stop_at     = time_us() + (cfg.duration * 1000000);
+
+    aeEventLoop *loop_admin        = aeCreateEventLoop(10 + cfg.connections * 3);
+thread *t_admin = &threads[cfg.threads];
+t_admin->loop = loop_admin;
 
     for (uint64_t i = 0; i < cfg.threads; i++) {
         thread *t = &threads[i];
@@ -160,7 +165,14 @@ int main(int argc, char **argv) {
             fprintf(stderr, "unable to create thread %"PRIu64": %s\n", i, msg);
             exit(2);
         }
+
+    aeCreateTimeEvent(loop_admin, CALIBRATE_DELAY_MS, calibrate, t, NULL);
+    aeCreateTimeEvent(loop_admin, TIMEOUT_INTERVAL_MS, check_timeouts, t, NULL);
+
     }
+
+        thread *t = &threads[cfg.threads];
+    pthread_create(&t->thread, NULL, &thread_main_admin, t);
 
     struct sigaction sa = {
         .sa_handler = handler,
@@ -198,7 +210,7 @@ int main(int argc, char **argv) {
     long double runtime_s   = runtime_us / 1000000.0;
     long double req_per_s   = complete   / runtime_s;
     long double bytes_per_s = bytes      / runtime_s;
-    long double avg_latency = sum_latency / complete;
+    long double avg_latency = sum_latency / (complete*1.0);
 
     print_stats_header();
     print_stats("Latency", statistics.latency, format_time_us);
@@ -231,6 +243,16 @@ int main(int argc, char **argv) {
     return 0;
 }
 
+void *thread_main_admin(void *arg) {
+    thread *thread = arg;
+    aeEventLoop *loop = thread->loop;
+
+    aeMain(loop);
+    aeDeleteEventLoop(loop);
+    return NULL;
+
+}
+
 void *thread_main(void *arg) {
     thread *thread = arg;
     aeEventLoop *loop = thread->loop;
@@ -256,8 +278,8 @@ void *thread_main(void *arg) {
         connect_socket(thread, c);
     }
 
-    aeCreateTimeEvent(loop, CALIBRATE_DELAY_MS, calibrate, thread, NULL);
-    aeCreateTimeEvent(loop, TIMEOUT_INTERVAL_MS, check_timeouts, thread, NULL);
+    //aeCreateTimeEvent(thread->loop, CALIBRATE_DELAY_MS, calibrate, thread, NULL);
+    //aeCreateTimeEvent(thread->loop, TIMEOUT_INTERVAL_MS, check_timeouts, thread, NULL);
 
     thread->start = time_us();
     aeMain(loop);
@@ -478,15 +500,15 @@ static void socket_writeable(aeEventLoop *loop, int fd, void *data, int mask) {
     size_t len = c->length  - c->written;
     size_t n;
 
+    if (!c->written) {
+        c->start = time_us();
+        c->pending = cfg.pipeline;
+    }
+
     switch (sock.write(c, buf, len, &n)) {
         case OK:    break;
         case ERROR: goto error;
         case RETRY: return;
-    }
-
-    if (!c->written) {
-        c->start = time_us();
-        c->pending = cfg.pipeline;
     }
 
     c->written += n;

@@ -19,8 +19,8 @@
 #define SAMPLES  100000000
 
 #define SOCKET_TIMEOUT_MS   2000
-#define CALIBRATE_DELAY_MS  500
-#define TIMEOUT_INTERVAL_MS 2000
+#define CALIBRATE_DELAY_MS  499
+#define TIMEOUT_INTERVAL_MS 299
 
 typedef struct {
     pthread_t thread;

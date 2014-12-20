@@ -30,6 +30,7 @@
 struct config;
 
 static void *thread_main(void *);
+static void *thread_main_admin(void *);
 static int connect_socket(thread *, connection *);
 static int reconnect_socket(thread *, connection *);
 
